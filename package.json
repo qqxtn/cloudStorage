@@ -1,0 +1,13 @@
+{
+  "name": "cloud-storage",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A lightweight local cloud drive with file uploads.",
+  "scripts": {
+    "start": "node server.js",
+    "start:3107": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

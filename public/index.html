@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>&#26412;&#22320;&#32593;&#30424;</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar" aria-label="space manager">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">D</span>
+          <div>
+            <p>Local Drive</p>
+            <strong>&#26412;&#22320;&#32593;&#30424;</strong>
+          </div>
+        </div>
+
+        <section class="space-card">
+          <label for="spaceSelect">&#24403;&#21069;&#31354;&#38388;</label>
+          <select id="spaceSelect"></select>
+          <form id="spaceForm" class="space-form">
+            <input id="spaceInput" type="text" placeholder="&#26032;&#24314;&#31354;&#38388;&#65292;&#22914; &#29992;&#25143;A" maxlength="40" />
+            <button type="submit">&#26032;&#24314;</button>
+          </form>
+        </section>
+
+        <div class="storage-card">
+          <span>&#23384;&#20648;&#20301;&#32622;</span>
+          <strong id="spacePath">uploads</strong>
+          <p>&#27599;&#20010;&#31354;&#38388;&#23545;&#24212;&#19968;&#20010;&#29420;&#31435;&#25991;&#20214;&#22841;</p>
+        </div>
+      </aside>
+
+      <section class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Personal Cloud</p>
+            <h1 id="pageTitle">&#25991;&#20214;&#31354;&#38388;</h1>
+          </div>
+          <button class="icon-button" id="refreshButton" type="button" title="&#21047;&#26032;&#25991;&#20214;&#21015;&#34920;" aria-label="refresh">
+            &#8635;
+          </button>
+        </header>
+
+        <section class="summary-grid" aria-label="summary">
+          <article class="summary-card">
+            <span>&#24403;&#21069;&#31354;&#38388;</span>
+            <strong id="currentSpace">&#40664;&#35748;&#31354;&#38388;</strong>
+          </article>
+          <article class="summary-card">
+            <span>&#25991;&#20214;&#25968;&#37327;</span>
+            <strong id="fileCount">0 &#20010;&#25991;&#20214;</strong>
+          </article>
+          <article class="summary-card">
+            <span>&#24050;&#29992;&#31354;&#38388;</span>
+            <strong id="totalSize">0 B</strong>
+          </article>
+          <article class="summary-card accent-card">
+            <span>&#29366;&#24577;</span>
+            <strong id="statusText">&#20934;&#22791;&#23601;&#32490;</strong>
+          </article>
+        </section>
+
+        <section class="upload-zone" id="dropZone">
+          <input id="fileInput" type="file" multiple hidden />
+          <div class="upload-copy">
+            <span class="upload-icon" aria-hidden="true">&#8593;</span>
+            <div>
+              <h2>&#19978;&#20256;&#21040;&#24403;&#21069;&#31354;&#38388;</h2>
+              <p id="uploadHint">&#20808;&#36873;&#25321;&#31354;&#38388;&#65292;&#20877;&#25302;&#25341;&#25991;&#20214;&#25110;&#28857;&#20987;&#25353;&#38062;&#19978;&#20256;&#12290;</p>
+            </div>
+          </div>
+          <button id="chooseButton" class="primary-button" type="button">&#36873;&#25321;&#25991;&#20214;</button>
+          <div id="uploadProgress" class="upload-progress" aria-hidden="true">
+            <div class="progress-head">
+              <span id="progressLabel">&#20934;&#22791;&#19978;&#20256;</span>
+              <strong id="progressPercent">0%</strong>
+            </div>
+            <div class="progress-track">
+              <div id="progressBar" class="progress-bar"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="file-panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Files</p>
+              <h2>&#25991;&#20214;&#21015;&#34920;</h2>
+            </div>
+          </div>
+          <div id="emptyState" class="empty-state">
+            <span aria-hidden="true">&#9633;</span>
+            <strong>&#24403;&#21069;&#31354;&#38388;&#36824;&#27809;&#26377;&#25991;&#20214;</strong>
+            <p>&#19978;&#20256;&#21518;&#20250;&#22312;&#36825;&#37324;&#26174;&#31034;&#21517;&#31216;&#12289;&#22823;&#23567;&#21644;&#20462;&#25913;&#26102;&#38388;&#12290;</p>
+          </div>
+          <ul id="fileList" class="file-list"></ul>
+        </section>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
