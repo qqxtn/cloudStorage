@@ -51,6 +51,14 @@ function finishAfterHeadersSent(res) {
   }
 }
 
+function isExpectedClientDisconnect(error) {
+  return error && (
+    error.code === "ERR_STREAM_PREMATURE_CLOSE" ||
+    error.code === "ECONNRESET" ||
+    error.code === "EPIPE"
+  );
+}
+
 function safeJoin(base, target) {
   const resolved = path.resolve(base, target);
   if (!resolved.startsWith(path.resolve(base) + path.sep) && resolved !== path.resolve(base)) {
@@ -368,6 +376,11 @@ async function handleRequest(req, res) {
 
     sendError(res, 405, "Method not allowed.");
   } catch (error) {
+    if (isExpectedClientDisconnect(error)) {
+      finishAfterHeadersSent(res);
+      return;
+    }
+
     console.error(error);
     if (res.headersSent) {
       finishAfterHeadersSent(res);
