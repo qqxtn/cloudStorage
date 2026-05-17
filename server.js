@@ -27,6 +27,12 @@ const MIME_TYPES = {
 };
 
 function sendJson(res, statusCode, payload) {
+  if (res.writableEnded) return;
+  if (res.headersSent) {
+    res.end();
+    return;
+  }
+
   const body = JSON.stringify(payload);
   res.writeHead(statusCode, {
     "content-type": "application/json; charset=utf-8",
@@ -37,6 +43,12 @@ function sendJson(res, statusCode, payload) {
 
 function sendError(res, statusCode, message) {
   sendJson(res, statusCode, { error: message });
+}
+
+function finishAfterHeadersSent(res) {
+  if (!res.writableEnded) {
+    res.end();
+  }
 }
 
 function safeJoin(base, target) {
@@ -356,6 +368,11 @@ async function handleRequest(req, res) {
 
     sendError(res, 405, "Method not allowed.");
   } catch (error) {
+    console.error(error);
+    if (res.headersSent) {
+      finishAfterHeadersSent(res);
+      return;
+    }
     sendError(res, 500, error.message || "Server error.");
   }
 }
