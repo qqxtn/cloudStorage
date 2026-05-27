@@ -9,9 +9,14 @@ const HOST = process.env.HOST || "0.0.0.0";
 const ROOT = __dirname;
 const PUBLIC_DIR = path.join(ROOT, "public");
 const UPLOAD_DIR = path.join(ROOT, "uploads");
-const DEFAULT_SPACE = "默认空间";
+const DATA_FILE = path.join(ROOT, "cloud-drive-data.json");
+const LEGACY_DEFAULT_SPACE = "\u9ed8\u8ba4\u7a7a\u95f4";
+const DEFAULT_SPACE = "\u516c\u5171\u7a7a\u95f4";
 
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+const adminSessions = new Set();
+const spaceSessions = new Map();
 
 const MIME_TYPES = {
   ".html": "text/html; charset=utf-8",
@@ -46,9 +51,7 @@ function sendError(res, statusCode, message) {
 }
 
 function finishAfterHeadersSent(res) {
-  if (!res.writableEnded) {
-    res.end();
-  }
+  if (!res.writableEnded) res.end();
 }
 
 function isExpectedClientDisconnect(error) {
@@ -74,15 +77,100 @@ function sanitizeName(name, fallback = "file") {
 }
 
 function getSpaceName(value) {
-  return sanitizeName(value || DEFAULT_SPACE, DEFAULT_SPACE);
+  const name = sanitizeName(value || DEFAULT_SPACE, DEFAULT_SPACE);
+  return name === LEGACY_DEFAULT_SPACE ? DEFAULT_SPACE : name;
 }
 
 function getSpaceDir(space) {
-  const spaceName = getSpaceName(space);
-  return safeJoin(UPLOAD_DIR, spaceName);
+  return safeJoin(UPLOAD_DIR, getSpaceName(space));
 }
 
-async function ensureSpace(space) {
+function randomToken(bytes = 24) {
+  return crypto.randomBytes(bytes).toString("base64url");
+}
+
+function hashPassword(password, salt = randomToken(16)) {
+  const hash = crypto.scryptSync(String(password), salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password, stored) {
+  if (!stored || !stored.includes(":")) return false;
+  const [salt, expected] = stored.split(":");
+  const actual = crypto.scryptSync(String(password), salt, 64);
+  return crypto.timingSafeEqual(Buffer.from(expected, "hex"), actual);
+}
+
+function loadData() {
+  if (!fs.existsSync(DATA_FILE)) return null;
+  try {
+    return JSON.parse(fs.readFileSync(DATA_FILE, "utf8"));
+  } catch (error) {
+    const backup = `${DATA_FILE}.broken-${Date.now()}`;
+    fs.renameSync(DATA_FILE, backup);
+    console.warn(`Invalid data file was backed up to ${backup}`);
+    return null;
+  }
+}
+
+function saveData(data) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), "utf8");
+}
+
+function createInitialData() {
+  const username = "admin";
+  const password = randomToken(12);
+  const data = {
+    admin: {
+      username,
+      password,
+      passwordHash: hashPassword(password)
+    },
+    spaces: {
+      [DEFAULT_SPACE]: {
+        name: DEFAULT_SPACE,
+        visibility: "public",
+        passwordHash: null,
+        createdAt: new Date().toISOString()
+      }
+    }
+  };
+  saveData(data);
+  return { data, created: true };
+}
+
+function getData() {
+  let data = loadData();
+  let created = false;
+  if (!data) {
+    const initial = createInitialData();
+    data = initial.data;
+    created = true;
+  }
+
+  data.spaces ||= {};
+  if (data.spaces[LEGACY_DEFAULT_SPACE] && !data.spaces[DEFAULT_SPACE]) {
+    data.spaces[DEFAULT_SPACE] = {
+      ...data.spaces[LEGACY_DEFAULT_SPACE],
+      name: DEFAULT_SPACE,
+      visibility: "public",
+      passwordHash: null
+    };
+    delete data.spaces[LEGACY_DEFAULT_SPACE];
+  }
+  data.spaces[DEFAULT_SPACE] ||= {
+    name: DEFAULT_SPACE,
+    visibility: "public",
+    passwordHash: null,
+    createdAt: new Date().toISOString()
+  };
+  saveData(data);
+  return { data, created };
+}
+
+let { data: appData, created: credentialsCreated } = getData();
+
+async function ensureSpaceDir(space) {
   const spaceName = getSpaceName(space);
   const dir = getSpaceDir(spaceName);
   if (!dir) throw new Error("Invalid space name.");
@@ -91,17 +179,92 @@ async function ensureSpace(space) {
 }
 
 async function migrateRootFiles() {
-  const defaultSpace = await ensureSpace(DEFAULT_SPACE);
+  const defaultSpace = await ensureSpaceDir(DEFAULT_SPACE);
+  const legacyDir = safeJoin(UPLOAD_DIR, LEGACY_DEFAULT_SPACE);
+  if (legacyDir && fs.existsSync(legacyDir) && legacyDir !== defaultSpace.dir) {
+    const entries = await fs.promises.readdir(legacyDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile()) continue;
+      const source = path.join(legacyDir, entry.name);
+      const target = path.join(defaultSpace.dir, uniqueName(entry.name, defaultSpace.dir));
+      await fs.promises.rename(source, target);
+    }
+    await fs.promises.rm(legacyDir, { recursive: true, force: true });
+  }
+
   const entries = await fs.promises.readdir(UPLOAD_DIR, { withFileTypes: true });
 
   for (const entry of entries) {
     if (!entry.isFile()) continue;
     const source = path.join(UPLOAD_DIR, entry.name);
     const target = path.join(defaultSpace.dir, entry.name);
-    if (!fs.existsSync(target)) {
-      await fs.promises.rename(source, target);
-    }
+    if (!fs.existsSync(target)) await fs.promises.rename(source, target);
   }
+}
+
+async function importExistingDirectories() {
+  const entries = await fs.promises.readdir(UPLOAD_DIR, { withFileTypes: true });
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const name = getSpaceName(entry.name);
+    appData.spaces[name] ||= {
+      name,
+      visibility: "public",
+      passwordHash: null,
+      createdAt: new Date().toISOString()
+    };
+  }
+  saveData(appData);
+}
+
+function getAdminToken(req) {
+  return req.headers["x-admin-token"] || req.routeUrl?.searchParams.get("adminToken") || "";
+}
+
+function isAdmin(req) {
+  return adminSessions.has(getAdminToken(req));
+}
+
+function requireAdmin(req, res) {
+  if (isAdmin(req)) return true;
+  sendError(res, 401, "Admin login required.");
+  return false;
+}
+
+function getSpaceToken(req) {
+  return req.headers["x-space-token"] || req.routeUrl?.searchParams.get("token") || "";
+}
+
+function isSpaceUnlocked(req, space) {
+  if (isAdmin(req)) return true;
+  const token = getSpaceToken(req);
+  return token && spaceSessions.get(token) === space;
+}
+
+function getSpaceMeta(space) {
+  return appData.spaces[getSpaceName(space)];
+}
+
+function requireSpaceAccess(req, res, space) {
+  const meta = getSpaceMeta(space);
+  if (!meta) {
+    sendError(res, 404, "Space not found.");
+    return false;
+  }
+  if (meta.visibility === "public" || isSpaceUnlocked(req, meta.name)) return true;
+  sendError(res, 401, "Space password required.");
+  return false;
+}
+
+function publicSpaceMeta(meta, stats) {
+  return {
+    name: meta.name,
+    visibility: meta.visibility || "public",
+    locked: meta.visibility === "private",
+    fileCount: stats.fileCount,
+    totalSize: stats.totalSize,
+    createdAt: meta.createdAt
+  };
 }
 
 function uniqueName(originalName, dir) {
@@ -117,50 +280,6 @@ function uniqueName(originalName, dir) {
   }
 
   return candidate;
-}
-
-function parseMultipart(body, contentType) {
-  const match = contentType.match(/boundary=(?:"([^"]+)"|([^;]+))/i);
-  if (!match) throw new Error("Missing multipart boundary.");
-
-  const boundary = Buffer.from(`--${match[1] || match[2]}`);
-  const files = [];
-  const fields = {};
-  let position = 0;
-
-  while (true) {
-    const boundaryStart = body.indexOf(boundary, position);
-    if (boundaryStart === -1) break;
-
-    let partStart = boundaryStart + boundary.length;
-    if (body.slice(partStart, partStart + 2).equals(Buffer.from("--"))) break;
-    if (body.slice(partStart, partStart + 2).equals(Buffer.from("\r\n"))) partStart += 2;
-
-    const headerEnd = body.indexOf(Buffer.from("\r\n\r\n"), partStart);
-    if (headerEnd === -1) break;
-
-    const headers = body.slice(partStart, headerEnd).toString("utf8");
-    const nextBoundary = body.indexOf(boundary, headerEnd + 4);
-    if (nextBoundary === -1) break;
-
-    let dataEnd = nextBoundary;
-    if (body.slice(dataEnd - 2, dataEnd).equals(Buffer.from("\r\n"))) dataEnd -= 2;
-
-    const data = body.slice(headerEnd + 4, dataEnd);
-    const disposition = headers.match(/content-disposition:\s*form-data;[^\r\n]*/i)?.[0] || "";
-    const nameMatch = disposition.match(/name="([^"]+)"/i);
-    const filenameMatch = disposition.match(/filename="([^"]*)"/i);
-
-    if (filenameMatch && filenameMatch[1]) {
-      files.push({ originalName: filenameMatch[1], data });
-    } else if (nameMatch && nameMatch[1]) {
-      fields[nameMatch[1]] = data.toString("utf8");
-    }
-
-    position = nextBoundary;
-  }
-
-  return { files, fields };
 }
 
 async function readBody(req, limitBytes = 1024 * 1024 * 1024) {
@@ -182,31 +301,8 @@ async function readJson(req) {
   return JSON.parse(body.toString("utf8"));
 }
 
-async function listSpaces() {
-  await ensureSpace(DEFAULT_SPACE);
-  const entries = await fs.promises.readdir(UPLOAD_DIR, { withFileTypes: true });
-  const spaces = await Promise.all(
-    entries
-      .filter((entry) => entry.isDirectory())
-      .map(async (entry) => {
-        const files = await listFiles(entry.name);
-        return {
-          name: entry.name,
-          fileCount: files.length,
-          totalSize: files.reduce((sum, file) => sum + file.size, 0)
-        };
-      })
-  );
-
-  return spaces.sort((a, b) => {
-    if (a.name === DEFAULT_SPACE) return -1;
-    if (b.name === DEFAULT_SPACE) return 1;
-    return a.name.localeCompare(b.name, "zh-CN");
-  });
-}
-
 async function listFiles(space) {
-  const { dir } = await ensureSpace(space);
+  const { dir } = await ensureSpaceDir(space);
   const entries = await fs.promises.readdir(dir, { withFileTypes: true });
   const files = await Promise.all(
     entries
@@ -226,7 +322,33 @@ async function listFiles(space) {
   return files.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
 }
 
-async function serveStatic(req, res, pathname) {
+async function getSpaceStats(space) {
+  const files = await listFiles(space);
+  return {
+    fileCount: files.length,
+    totalSize: files.reduce((sum, file) => sum + file.size, 0)
+  };
+}
+
+async function listSpaces(req) {
+  const spaces = await Promise.all(
+    Object.values(appData.spaces).map(async (meta) => {
+      await ensureSpaceDir(meta.name);
+      const stats = await getSpaceStats(meta.name);
+      const result = publicSpaceMeta(meta, stats);
+      result.unlocked = meta.visibility === "public" || isSpaceUnlocked(req, meta.name);
+      return result;
+    })
+  );
+
+  return spaces.sort((a, b) => {
+    if (a.name === DEFAULT_SPACE) return -1;
+    if (b.name === DEFAULT_SPACE) return 1;
+    return a.name.localeCompare(b.name, "zh-CN");
+  });
+}
+
+async function serveStatic(res, pathname) {
   const requestPath = pathname === "/" ? "index.html" : pathname.slice(1);
   const filePath = safeJoin(PUBLIC_DIR, requestPath);
 
@@ -235,26 +357,22 @@ async function serveStatic(req, res, pathname) {
     return;
   }
 
-  try {
-    const stats = await fs.promises.stat(filePath);
-    if (!stats.isFile()) {
-      sendError(res, 404, "Not found.");
-      return;
-    }
-
-    res.writeHead(200, {
-      "content-type": MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream",
-      "content-length": stats.size
-    });
-    await pipeline(fs.createReadStream(filePath), res);
-  } catch (error) {
+  const stats = await fs.promises.stat(filePath);
+  if (!stats.isFile()) {
     sendError(res, 404, "Not found.");
+    return;
   }
+
+  res.writeHead(200, {
+    "content-type": MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream",
+    "content-length": stats.size
+  });
+  await pipeline(fs.createReadStream(filePath), res);
 }
 
 async function saveRawUpload(req, space) {
   const originalName = decodeURIComponent(req.headers["x-file-name"] || "file");
-  const { name: spaceName, dir } = await ensureSpace(space);
+  const { name: spaceName, dir } = await ensureSpaceDir(space);
   const name = uniqueName(originalName, dir);
   const target = path.join(dir, name);
 
@@ -269,69 +387,152 @@ async function saveRawUpload(req, space) {
   return { space: spaceName, saved: { name, size: stats.size } };
 }
 
+async function deleteDirectory(dir) {
+  const resolved = path.resolve(dir);
+  const root = path.resolve(UPLOAD_DIR);
+  if (!resolved.startsWith(root + path.sep)) throw new Error("Invalid delete target.");
+  await fs.promises.rm(resolved, { recursive: true, force: true });
+}
+
 async function handleRequest(req, res) {
   const url = new URL(req.url, `http://${req.headers.host}`);
+  req.routeUrl = url;
   const pathname = decodeURIComponent(url.pathname);
 
   try {
+    if (req.method === "GET" && pathname === "/api/admin/status") {
+      sendJson(res, 200, {
+        loggedIn: isAdmin(req),
+        username: isAdmin(req) ? appData.admin.username : null
+      });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/admin/login") {
+      const body = await readJson(req);
+      const ok = body.username === appData.admin.username && verifyPassword(body.password, appData.admin.passwordHash);
+      if (!ok) {
+        sendError(res, 401, "Invalid admin credentials.");
+        return;
+      }
+      const token = randomToken();
+      adminSessions.add(token);
+      sendJson(res, 200, { token, username: appData.admin.username });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/admin/logout") {
+      const token = getAdminToken(req);
+      if (token) adminSessions.delete(token);
+      sendJson(res, 200, { loggedIn: false });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/spaces/login") {
+      const body = await readJson(req);
+      const name = getSpaceName(body.name);
+      const meta = getSpaceMeta(name);
+      if (!meta) {
+        sendError(res, 404, "Space not found.");
+        return;
+      }
+      if (meta.visibility === "public") {
+        sendJson(res, 200, { token: null, space: name });
+        return;
+      }
+      if (!verifyPassword(body.password, meta.passwordHash)) {
+        sendError(res, 401, "Invalid space password.");
+        return;
+      }
+      const token = randomToken();
+      spaceSessions.set(token, name);
+      sendJson(res, 200, { token, space: name });
+      return;
+    }
+
     if (req.method === "GET" && pathname === "/api/spaces") {
-      sendJson(res, 200, { spaces: await listSpaces(), defaultSpace: DEFAULT_SPACE });
+      sendJson(res, 200, {
+        spaces: await listSpaces(req),
+        defaultSpace: DEFAULT_SPACE,
+        admin: { loggedIn: isAdmin(req), username: isAdmin(req) ? appData.admin.username : null }
+      });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/spaces") {
+      if (!requireAdmin(req, res)) return;
       const body = await readJson(req);
-      const { name } = await ensureSpace(body.name);
-      sendJson(res, 201, { space: name, spaces: await listSpaces() });
+      const name = getSpaceName(body.name);
+      const visibility = body.visibility === "private" ? "private" : "public";
+      if (appData.spaces[name]) {
+        sendError(res, 409, "Space already exists.");
+        return;
+      }
+      if (visibility === "private" && !body.password) {
+        sendError(res, 400, "Private space password is required.");
+        return;
+      }
+
+      appData.spaces[name] = {
+        name,
+        visibility,
+        passwordHash: visibility === "private" ? hashPassword(body.password) : null,
+        createdAt: new Date().toISOString()
+      };
+      saveData(appData);
+      await ensureSpaceDir(name);
+      sendJson(res, 201, { space: name, spaces: await listSpaces(req) });
+      return;
+    }
+
+    if (req.method === "DELETE" && pathname === "/api/spaces") {
+      if (!requireAdmin(req, res)) return;
+      const name = getSpaceName(url.searchParams.get("space"));
+      if (name === DEFAULT_SPACE) {
+        sendError(res, 400, "Default space cannot be deleted.");
+        return;
+      }
+      if (!appData.spaces[name]) {
+        sendError(res, 404, "Space not found.");
+        return;
+      }
+
+      delete appData.spaces[name];
+      saveData(appData);
+      const dir = getSpaceDir(name);
+      if (dir) await deleteDirectory(dir);
+      sendJson(res, 200, { spaces: await listSpaces(req), defaultSpace: DEFAULT_SPACE });
       return;
     }
 
     if (req.method === "GET" && pathname === "/api/files") {
       const space = getSpaceName(url.searchParams.get("space"));
+      if (!requireSpaceAccess(req, res, space)) return;
       sendJson(res, 200, { space, files: await listFiles(space) });
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/upload") {
-      if (req.headers["x-file-name"]) {
-        const upload = await saveRawUpload(req, url.searchParams.get("space"));
-        sendJson(res, 201, {
-          space: upload.space,
-          saved: [upload.saved],
-          spaces: await listSpaces(),
-          files: await listFiles(upload.space)
-        });
+      const space = getSpaceName(url.searchParams.get("space"));
+      if (!requireSpaceAccess(req, res, space)) return;
+      if (!req.headers["x-file-name"]) {
+        sendError(res, 400, "Missing x-file-name header.");
         return;
       }
 
-      const contentType = req.headers["content-type"] || "";
-      if (!contentType.includes("multipart/form-data")) {
-        sendError(res, 400, "Please upload files with multipart/form-data.");
-        return;
-      }
-
-      const body = await readBody(req);
-      const { files, fields } = parseMultipart(body, contentType);
-      const { name: space, dir } = await ensureSpace(fields.space);
-      const saved = [];
-
-      for (const file of files) {
-        const name = uniqueName(file.originalName, dir);
-        await fs.promises.writeFile(path.join(dir, name), file.data);
-        saved.push({ name, size: file.data.length });
-      }
-
+      const upload = await saveRawUpload(req, space);
       sendJson(res, 201, {
-        space,
-        saved,
-        spaces: await listSpaces(),
-        files: await listFiles(space)
+        space: upload.space,
+        saved: [upload.saved],
+        spaces: await listSpaces(req),
+        files: await listFiles(upload.space)
       });
       return;
     }
 
     if (req.method === "GET" && pathname === "/files") {
       const space = getSpaceName(url.searchParams.get("space"));
+      if (!requireSpaceAccess(req, res, space)) return;
       const name = sanitizeName(url.searchParams.get("name"));
       const dir = getSpaceDir(space);
       const filePath = dir ? safeJoin(dir, name) : null;
@@ -352,6 +553,7 @@ async function handleRequest(req, res) {
 
     if (req.method === "DELETE" && pathname === "/api/files") {
       const space = getSpaceName(url.searchParams.get("space"));
+      if (!requireSpaceAccess(req, res, space)) return;
       const name = sanitizeName(url.searchParams.get("name"));
       const dir = getSpaceDir(space);
       const filePath = dir ? safeJoin(dir, name) : null;
@@ -363,14 +565,14 @@ async function handleRequest(req, res) {
       await fs.promises.unlink(filePath);
       sendJson(res, 200, {
         space,
-        spaces: await listSpaces(),
+        spaces: await listSpaces(req),
         files: await listFiles(space)
       });
       return;
     }
 
     if (req.method === "GET") {
-      await serveStatic(req, res, pathname);
+      await serveStatic(res, pathname);
       return;
     }
 
@@ -390,14 +592,25 @@ async function handleRequest(req, res) {
   }
 }
 
-migrateRootFiles()
-  .then(() => {
-    http.createServer(handleRequest).listen(PORT, HOST, () => {
-      console.log(`Cloud storage is running at http://${HOST}:${PORT}`);
-      console.log(`Uploaded files are stored in ${UPLOAD_DIR}`);
-    });
-  })
-  .catch((error) => {
-    console.error(error);
-    process.exit(1);
+async function start() {
+  await migrateRootFiles();
+  await importExistingDirectories();
+
+  if (credentialsCreated) {
+    console.log("Admin credentials generated:");
+  } else {
+    console.log("Admin credentials:");
+  }
+  console.log(`  username: ${appData.admin.username}`);
+  console.log(`  password: ${appData.admin.password}`);
+
+  http.createServer(handleRequest).listen(PORT, HOST, () => {
+    console.log(`Cloud storage is running at http://${HOST}:${PORT}`);
+    console.log(`Uploaded files are stored in ${UPLOAD_DIR}`);
   });
+}
+
+start().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

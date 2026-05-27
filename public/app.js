@@ -1,4 +1,5 @@
-const DEFAULT_SPACE = "\u9ed8\u8ba4\u7a7a\u95f4";
+const DEFAULT_SPACE = "\u516c\u5171\u7a7a\u95f4";
+const LEGACY_DEFAULT_SPACE = "\u9ed8\u8ba4\u7a7a\u95f4";
 
 const fileInput = document.querySelector("#fileInput");
 const chooseButton = document.querySelector("#chooseButton");
@@ -6,12 +7,27 @@ const refreshButton = document.querySelector("#refreshButton");
 const dropZone = document.querySelector("#dropZone");
 const fileList = document.querySelector("#fileList");
 const emptyState = document.querySelector("#emptyState");
+const emptyTitle = document.querySelector("#emptyTitle");
+const emptyText = document.querySelector("#emptyText");
 const statusText = document.querySelector("#statusText");
 const fileCount = document.querySelector("#fileCount");
 const totalSize = document.querySelector("#totalSize");
+const spaceType = document.querySelector("#spaceType");
 const spaceSelect = document.querySelector("#spaceSelect");
+const spaceAccessText = document.querySelector("#spaceAccessText");
+const spaceLoginForm = document.querySelector("#spaceLoginForm");
+const spacePasswordInput = document.querySelector("#spacePasswordInput");
 const spaceForm = document.querySelector("#spaceForm");
 const spaceInput = document.querySelector("#spaceInput");
+const spaceVisibility = document.querySelector("#spaceVisibility");
+const newSpacePasswordInput = document.querySelector("#newSpacePasswordInput");
+const deleteSpaceButton = document.querySelector("#deleteSpaceButton");
+const adminLoginForm = document.querySelector("#adminLoginForm");
+const adminUserInput = document.querySelector("#adminUserInput");
+const adminPasswordInput = document.querySelector("#adminPasswordInput");
+const adminState = document.querySelector("#adminState");
+const adminPanel = document.querySelector("#adminPanel");
+const adminLogoutButton = document.querySelector("#adminLogoutButton");
 const currentSpace = document.querySelector("#currentSpace");
 const pageTitle = document.querySelector("#pageTitle");
 const uploadHint = document.querySelector("#uploadHint");
@@ -20,21 +36,28 @@ const uploadProgress = document.querySelector("#uploadProgress");
 const progressLabel = document.querySelector("#progressLabel");
 const progressPercent = document.querySelector("#progressPercent");
 const progressBar = document.querySelector("#progressBar");
+const privateSpaceModal = document.querySelector("#privateSpaceModal");
+const privateSpaceLoginForm = document.querySelector("#privateSpaceLoginForm");
+const modalSpaceName = document.querySelector("#modalSpaceName");
+const modalSpacePasswordInput = document.querySelector("#modalSpacePasswordInput");
+const modalCloseButton = document.querySelector("#modalCloseButton");
 
 let activeSpace = localStorage.getItem("activeSpace") || DEFAULT_SPACE;
+if (activeSpace === LEGACY_DEFAULT_SPACE) activeSpace = DEFAULT_SPACE;
+let adminToken = localStorage.getItem("adminToken") || "";
+let adminLoggedIn = false;
+let spaces = [];
 let isUploading = false;
+let firstLoad = true;
 
 function escapeHtml(value) {
-  return String(value).replace(/[&<>"']/g, (char) => {
-    const map = {
-      "&": "&amp;",
-      "<": "&lt;",
-      ">": "&gt;",
-      "\"": "&quot;",
-      "'": "&#39;"
-    };
-    return map[char];
-  });
+  return String(value).replace(/[&<>"']/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    "\"": "&quot;",
+    "'": "&#39;"
+  }[char]));
 }
 
 function formatSize(bytes) {
@@ -58,6 +81,30 @@ function fileBadge(name) {
   return extension || "FILE";
 }
 
+function headers(extra = {}) {
+  return adminToken ? { ...extra, "x-admin-token": adminToken } : extra;
+}
+
+function spaceToken(space) {
+  return sessionStorage.getItem(`spaceToken:${space}`) || "";
+}
+
+function authHeaders(space, extra = {}) {
+  const token = spaceToken(space);
+  const result = headers(extra);
+  if (token) result["x-space-token"] = token;
+  return result;
+}
+
+function currentMeta() {
+  return spaces.find((space) => space.name === activeSpace);
+}
+
+function hasSpaceAccess(space) {
+  const meta = spaces.find((item) => item.name === space);
+  return !meta || meta.visibility === "public" || meta.unlocked || Boolean(spaceToken(space)) || adminLoggedIn;
+}
+
 function setStatus(message) {
   statusText.textContent = message;
 }
@@ -74,23 +121,57 @@ function setProgress(percent, label) {
 function resetProgress() {
   progressBar.style.width = "0%";
   progressPercent.textContent = "0%";
-  progressLabel.textContent = "\u51c6\u5907\u4e0a\u4f20";
+  progressLabel.textContent = "准备上传";
   uploadProgress.classList.remove("is-visible");
   uploadProgress.setAttribute("aria-hidden", "true");
+}
+
+function showPrivateSpaceModal() {
+  modalSpaceName.textContent = activeSpace;
+  modalSpacePasswordInput.value = "";
+  privateSpaceModal.classList.remove("is-hidden");
+  window.setTimeout(() => modalSpacePasswordInput.focus(), 0);
+}
+
+function hidePrivateSpaceModal() {
+  privateSpaceModal.classList.add("is-hidden");
+  modalSpacePasswordInput.value = "";
 }
 
 function setActiveSpace(space) {
   activeSpace = space || DEFAULT_SPACE;
   localStorage.setItem("activeSpace", activeSpace);
+  const meta = currentMeta();
   currentSpace.textContent = activeSpace;
-  pageTitle.textContent = `${activeSpace} \u6587\u4ef6\u7a7a\u95f4`;
-  uploadHint.textContent = `\u6587\u4ef6\u5c06\u4e0a\u4f20\u5230\u201c${activeSpace}\u201d\u3002`;
+  pageTitle.textContent = `${activeSpace} 文件空间`;
   spacePath.textContent = `uploads/${activeSpace}`;
+  spaceType.textContent = meta?.visibility === "private" ? "私有" : "公有";
+  uploadHint.textContent = `文件将上传到“${activeSpace}”。`;
+  deleteSpaceButton.disabled = activeSpace === DEFAULT_SPACE;
+
+  const locked = meta?.visibility === "private" && !hasSpaceAccess(activeSpace);
+  spaceLoginForm.classList.add("is-hidden");
+  chooseButton.disabled = locked;
+  spaceAccessText.textContent = locked ? "私有空间，选择后需要密码登录。" : "当前空间可访问。";
+  if (!locked) hidePrivateSpaceModal();
 }
 
-function renderSpaces(spaces) {
+function setLockedView() {
+  fileCount.textContent = "0 个文件";
+  totalSize.textContent = "0 B";
+  fileList.innerHTML = "";
+  emptyState.classList.remove("is-hidden");
+  emptyTitle.textContent = "私有空间已锁定";
+  emptyText.textContent = "请输入空间密码，解锁后才能查看和上传文件。";
+  setStatus("等待空间密码");
+}
+
+function renderSpaces(nextSpaces, options = {}) {
+  spaces = nextSpaces;
   const names = spaces.map((space) => space.name);
-  if (!names.includes(activeSpace)) {
+  if (options.preferDefault && names.includes(DEFAULT_SPACE)) {
+    activeSpace = DEFAULT_SPACE;
+  } else if (!names.includes(activeSpace)) {
     activeSpace = names[0] || DEFAULT_SPACE;
   }
 
@@ -98,7 +179,7 @@ function renderSpaces(spaces) {
   for (const space of spaces) {
     const option = document.createElement("option");
     option.value = space.name;
-    option.textContent = `${space.name}\uff08${space.fileCount}\uff09`;
+    option.textContent = `${space.name}（${space.visibility === "private" ? "私有" : "公有"}）`;
     option.selected = space.name === activeSpace;
     spaceSelect.appendChild(option);
   }
@@ -106,11 +187,24 @@ function renderSpaces(spaces) {
   setActiveSpace(activeSpace);
 }
 
+function renderAdmin(loggedIn, username) {
+  adminLoggedIn = loggedIn;
+  if (!loggedIn && adminToken) {
+    adminToken = "";
+    localStorage.removeItem("adminToken");
+  }
+  adminState.textContent = loggedIn ? `已登录：${username}` : "未登录";
+  adminLoginForm.classList.toggle("is-hidden", loggedIn);
+  adminPanel.classList.toggle("is-hidden", !loggedIn);
+}
+
 function renderFiles(files) {
   const total = files.reduce((sum, file) => sum + file.size, 0);
-  fileCount.textContent = `${files.length} \u4e2a\u6587\u4ef6`;
+  fileCount.textContent = `${files.length} 个文件`;
   totalSize.textContent = formatSize(total);
   emptyState.classList.toggle("is-hidden", files.length > 0);
+  emptyTitle.textContent = "当前空间还没有文件";
+  emptyText.textContent = "上传后会在这里显示名称、大小和修改时间。";
   fileList.innerHTML = "";
 
   for (const file of files) {
@@ -128,8 +222,8 @@ function renderFiles(files) {
         </div>
       </div>
       <div class="file-actions">
-        <a class="text-button" href="${downloadUrl}">\u4e0b\u8f7d</a>
-        <button class="text-button danger" data-delete="${safeName}" type="button">\u5220\u9664</button>
+        <a class="text-button" href="${downloadUrl}" data-download="${safeName}">下载</a>
+        <button class="text-button danger" data-delete="${safeName}" type="button">删除</button>
       </div>
     `;
     fileList.appendChild(item);
@@ -137,21 +231,45 @@ function renderFiles(files) {
 }
 
 async function loadSpaces() {
-  const response = await fetch("/api/spaces");
+  const response = await fetch("/api/spaces", { headers: headers() });
   const data = await response.json();
-  renderSpaces(data.spaces || []);
+  if (!response.ok) throw new Error(data.error || "加载空间失败");
+  renderAdmin(Boolean(data.admin?.loggedIn), data.admin?.username);
+  renderSpaces(data.spaces || [], { preferDefault: firstLoad });
+  firstLoad = false;
 }
 
 async function loadFiles() {
-  setStatus("\u6b63\u5728\u5237\u65b0...");
-  const response = await fetch(`/api/files?space=${encodeURIComponent(activeSpace)}`);
+  setActiveSpace(activeSpace);
+  if (!hasSpaceAccess(activeSpace)) {
+    setLockedView();
+    showPrivateSpaceModal();
+    return;
+  }
+
+  setStatus("正在刷新...");
+  const response = await fetch(`/api/files?space=${encodeURIComponent(activeSpace)}`, {
+    headers: authHeaders(activeSpace)
+  });
   const data = await response.json();
+  if (response.status === 401) {
+    sessionStorage.removeItem(`spaceToken:${activeSpace}`);
+    setLockedView();
+    showPrivateSpaceModal();
+    return;
+  }
+  if (!response.ok) throw new Error(data.error || "加载文件失败");
   renderFiles(data.files || []);
-  setStatus("\u51c6\u5907\u5c31\u7eea");
+  setStatus("准备就绪");
 }
 
-async function refreshAll() {
+async function refreshAll(options = {}) {
   await loadSpaces();
+  if (options.keepActiveSpace) {
+    const names = spaces.map((space) => space.name);
+    if (names.includes(options.keepActiveSpace)) activeSpace = options.keepActiveSpace;
+    renderSpaces(spaces);
+  }
   await loadFiles();
 }
 
@@ -162,7 +280,7 @@ function uploadFileWithProgress(file, fileIndex, fileTotal, completedBytes, tota
     let reachedUploadEnd = false;
     const slowTimer = window.setInterval(() => {
       if (reachedUploadEnd || Date.now() - lastProgressAt < 4000) return;
-      progressLabel.textContent = "\u4ecd\u5728\u4e0a\u4f20\uff0c\u8bf7\u4e0d\u8981\u5173\u95ed\u9875\u9762";
+      progressLabel.textContent = "仍在上传，请不要关闭页面";
     }, 1000);
 
     function finish() {
@@ -173,29 +291,31 @@ function uploadFileWithProgress(file, fileIndex, fileTotal, completedBytes, tota
     xhr.responseType = "json";
     xhr.setRequestHeader("x-file-name", encodeURIComponent(file.name));
     xhr.setRequestHeader("content-type", file.type || "application/octet-stream");
+    if (adminToken) xhr.setRequestHeader("x-admin-token", adminToken);
+    if (spaceToken(activeSpace)) xhr.setRequestHeader("x-space-token", spaceToken(activeSpace));
 
     xhr.upload.addEventListener("progress", (event) => {
       lastProgressAt = Date.now();
       if (!event.lengthComputable) {
-        setProgress(5, "\u6b63\u5728\u4e0a\u4f20...");
+        setProgress(5, "正在上传...");
         return;
       }
 
       const percent = Math.min(((completedBytes + event.loaded) / totalBytes) * 100, 99);
-      setProgress(percent, `\u6b63\u5728\u4e0a\u4f20 ${fileIndex + 1}/${fileTotal}\uff1a${file.name}`);
+      setProgress(percent, `正在上传 ${fileIndex + 1}/${fileTotal}：${file.name}`);
     });
 
     xhr.upload.addEventListener("load", () => {
       reachedUploadEnd = true;
       const percent = Math.min(((completedBytes + file.size) / totalBytes) * 100, 99);
-      setProgress(percent, "\u89c6\u9891\u5df2\u53d1\u9001\uff0c\u670d\u52a1\u5668\u6b63\u5728\u5199\u5165\u78c1\u76d8...");
+      setProgress(percent, "文件已发送，服务器正在写入磁盘...");
     });
 
     xhr.addEventListener("load", () => {
       finish();
       const data = xhr.response || {};
       if (xhr.status < 200 || xhr.status >= 300) {
-        reject(new Error(data.error || "\u4e0a\u4f20\u5931\u8d25"));
+        reject(new Error(data.error || "上传失败"));
         return;
       }
       resolve(data);
@@ -203,81 +323,186 @@ function uploadFileWithProgress(file, fileIndex, fileTotal, completedBytes, tota
 
     xhr.addEventListener("error", () => {
       finish();
-      reject(new Error("\u7f51\u7edc\u9519\u8bef\uff0c\u4e0a\u4f20\u5931\u8d25"));
+      reject(new Error("网络错误，上传失败"));
     });
     xhr.addEventListener("abort", () => {
       finish();
-      reject(new Error("\u4e0a\u4f20\u5df2\u53d6\u6d88"));
+      reject(new Error("上传已取消"));
     });
     xhr.send(file);
   });
 }
 
 async function uploadFiles(files) {
-  if (!files.length || isUploading) return;
+  if (!files.length || isUploading || !hasSpaceAccess(activeSpace)) return;
 
   isUploading = true;
   chooseButton.disabled = true;
   spaceSelect.disabled = true;
-  setStatus(`\u6b63\u5728\u4e0a\u4f20 ${files.length} \u4e2a\u6587\u4ef6...`);
-  setProgress(0, "\u6b63\u5728\u51c6\u5907\u4e0a\u4f20");
+  setStatus(`正在上传 ${files.length} 个文件...`);
+  setProgress(0, "正在准备上传");
 
   try {
     const totalBytes = files.reduce((sum, file) => sum + file.size, 0) || 1;
     let completedBytes = 0;
-    let data = null;
 
     for (const [index, file] of files.entries()) {
-      data = await uploadFileWithProgress(file, index, files.length, completedBytes, totalBytes);
+      const data = await uploadFileWithProgress(file, index, files.length, completedBytes, totalBytes);
       completedBytes += file.size;
-      renderSpaces(data.spaces || []);
+      renderSpaces(data.spaces || spaces);
       renderFiles(data.files || []);
     }
 
-    setProgress(100, "\u4e0a\u4f20\u5b8c\u6210");
-    setStatus(`\u5df2\u4e0a\u4f20 ${files.length} \u4e2a\u6587\u4ef6`);
+    setProgress(100, "上传完成");
+    setStatus(`已上传 ${files.length} 个文件`);
     window.setTimeout(resetProgress, 1200);
   } finally {
     isUploading = false;
     chooseButton.disabled = false;
     spaceSelect.disabled = false;
+    setActiveSpace(activeSpace);
   }
 }
+
+adminLoginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const response = await fetch("/api/admin/login", {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ username: adminUserInput.value.trim(), password: adminPasswordInput.value })
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(data.error || "管理员登录失败");
+    return;
+  }
+
+  adminToken = data.token;
+  localStorage.setItem("adminToken", adminToken);
+  adminPasswordInput.value = "";
+  setStatus("管理员已登录");
+  await refreshAll();
+});
+
+adminLogoutButton.addEventListener("click", async () => {
+  if (adminToken) {
+    await fetch("/api/admin/logout", {
+      method: "POST",
+      headers: headers()
+    }).catch(() => {});
+  }
+
+  adminToken = "";
+  localStorage.removeItem("adminToken");
+  renderAdmin(false, null);
+  setStatus("管理员已退出");
+  await refreshAll();
+});
+
+spaceVisibility.addEventListener("change", () => {
+  newSpacePasswordInput.classList.toggle("is-hidden", spaceVisibility.value !== "private");
+});
 
 spaceForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const name = spaceInput.value.trim();
   if (!name) return;
 
-  setStatus("\u6b63\u5728\u65b0\u5efa\u7a7a\u95f4...");
   const response = await fetch("/api/spaces", {
     method: "POST",
-    headers: { "content-type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ name })
+    headers: headers({ "content-type": "application/json; charset=utf-8" }),
+    body: JSON.stringify({
+      name,
+      visibility: spaceVisibility.value,
+      password: newSpacePasswordInput.value
+    })
   });
   const data = await response.json();
-
   if (!response.ok) {
-    setStatus(data.error || "\u65b0\u5efa\u7a7a\u95f4\u5931\u8d25");
+    setStatus(data.error || "创建空间失败");
     return;
   }
 
   spaceInput.value = "";
-  setActiveSpace(data.space);
-  renderSpaces(data.spaces || []);
-  await loadFiles();
-  setStatus("\u7a7a\u95f4\u5df2\u521b\u5efa");
+  newSpacePasswordInput.value = "";
+  activeSpace = data.space;
+  setStatus("空间已创建");
+  await refreshAll({ keepActiveSpace: activeSpace });
+});
+
+deleteSpaceButton.addEventListener("click", async () => {
+  if (activeSpace === DEFAULT_SPACE) return;
+  if (!confirm(`删除空间“${activeSpace}”？空间内文件也会删除。`)) return;
+
+  const response = await fetch(`/api/spaces?space=${encodeURIComponent(activeSpace)}`, {
+    method: "DELETE",
+    headers: headers()
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(data.error || "删除空间失败");
+    return;
+  }
+
+  activeSpace = data.defaultSpace || DEFAULT_SPACE;
+  localStorage.setItem("activeSpace", activeSpace);
+  setStatus("空间已删除");
+  await refreshAll();
+});
+
+async function loginCurrentPrivateSpace(password) {
+  const response = await fetch("/api/spaces/login", {
+    method: "POST",
+    headers: { "content-type": "application/json; charset=utf-8" },
+    body: JSON.stringify({ name: activeSpace, password })
+  });
+  const data = await response.json();
+  if (!response.ok) {
+    setStatus(data.error || "空间密码错误");
+    return false;
+  }
+
+  if (data.token) sessionStorage.setItem(`spaceToken:${activeSpace}`, data.token);
+  setStatus("空间已解锁");
+  hidePrivateSpaceModal();
+  await refreshAll();
+  return true;
+}
+
+spaceLoginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const ok = await loginCurrentPrivateSpace(spacePasswordInput.value);
+  if (!ok) return;
+  spacePasswordInput.value = "";
+});
+
+privateSpaceLoginForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  await loginCurrentPrivateSpace(modalSpacePasswordInput.value);
+});
+
+modalCloseButton.addEventListener("click", () => {
+  hidePrivateSpaceModal();
 });
 
 spaceSelect.addEventListener("change", async () => {
-  setActiveSpace(spaceSelect.value);
+  activeSpace = spaceSelect.value;
+  localStorage.setItem("activeSpace", activeSpace);
+  setActiveSpace(activeSpace);
+  if (!hasSpaceAccess(activeSpace)) {
+    setLockedView();
+    showPrivateSpaceModal();
+    return;
+  }
   await loadFiles();
 });
 
-chooseButton.addEventListener("click", () => fileInput.click());
+chooseButton.addEventListener("click", () => {
+  if (!chooseButton.disabled) fileInput.click();
+});
 
 dropZone.addEventListener("click", (event) => {
-  if (event.target === chooseButton || isUploading) return;
+  if (event.target === chooseButton || isUploading || chooseButton.disabled) return;
   fileInput.click();
 });
 
@@ -320,27 +545,38 @@ refreshButton.addEventListener("click", () => {
 });
 
 fileList.addEventListener("click", async (event) => {
+  const download = event.target.closest("[data-download]");
+  if (download) {
+    const token = spaceToken(activeSpace);
+    const baseUrl = `/files?space=${encodeURIComponent(activeSpace)}&name=${encodeURIComponent(download.dataset.download)}`;
+    download.href = baseUrl;
+    if (adminToken || token) {
+      download.href = `${baseUrl}&token=${encodeURIComponent(token)}&adminToken=${encodeURIComponent(adminToken)}`;
+    }
+    return;
+  }
+
   const button = event.target.closest("[data-delete]");
   if (!button) return;
 
   const name = button.dataset.delete;
-  if (!confirm(`\u5220\u9664 ${name}\uff1f`)) return;
+  if (!confirm(`删除 ${name}？`)) return;
 
-  setStatus("\u6b63\u5728\u5220\u9664...");
+  setStatus("正在删除...");
   const response = await fetch(
     `/api/files?space=${encodeURIComponent(activeSpace)}&name=${encodeURIComponent(name)}`,
-    { method: "DELETE" }
+    { method: "DELETE", headers: authHeaders(activeSpace) }
   );
   const data = await response.json();
 
   if (!response.ok) {
-    setStatus(data.error || "\u5220\u9664\u5931\u8d25");
+    setStatus(data.error || "删除失败");
     return;
   }
 
   renderSpaces(data.spaces || []);
   renderFiles(data.files || []);
-  setStatus("\u5df2\u5220\u9664");
+  setStatus("已删除");
 });
 
 refreshAll().catch((error) => setStatus(error.message));

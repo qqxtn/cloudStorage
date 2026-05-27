@@ -1,5 +1,8 @@
 node_modules/
 uploads/
+cloud-drive-data.json
+cloud-drive-data.json.broken-*
+.idea/
 *.log
 .DS_Store
 Thumbs.db

@@ -2,14 +2,19 @@
 
 English | [Chinese](./README.zh-CN.md)
 
-A lightweight local cloud-drive web app built with plain Node.js and vanilla HTML/CSS/JavaScript. It supports isolated storage spaces, large-file uploads, upload progress, file listing, downloads, and deletion.
+A lightweight local cloud-drive web app built with plain Node.js and vanilla HTML/CSS/JavaScript. It supports admin-managed storage spaces, public and private spaces, large-file streaming uploads, upload progress, file listing, downloads, and deletion.
 
 This project has no runtime npm dependencies.
 
 ## Features
 
-- Create multiple storage spaces, such as `User A` and `User B`
-- Upload files into the currently selected space
+- Generate an admin username and password on first run
+- Admin login and logout
+- Admin-only space creation and deletion
+- Public spaces that anyone can access without a password
+- Private spaces that require a space password before files are shown
+- Admin can access all spaces without entering space passwords
+- The app opens on `Public Space` by default
 - Keep files isolated by space under `uploads/<space-name>`
 - Stream large files directly to disk on the server
 - Show upload progress in the browser
@@ -35,6 +40,14 @@ This project has no runtime npm dependencies.
 npm start
 ```
 
+On first run, the server prints admin credentials:
+
+```text
+Admin credentials generated:
+  username: admin
+  password: <generated-password>
+```
+
 Open:
 
 ```text
@@ -53,6 +66,22 @@ Example:
 http://192.168.0.102:3107/
 ```
 
+## Admin and Spaces
+
+Only the admin can create or delete spaces.
+
+Space types:
+
+- Public space: no password is required.
+- Private space: users must enter the space password before files are listed or uploaded.
+
+Admin access:
+
+- After admin login, all spaces are accessible without entering private space passwords.
+- Admin can log out from the admin panel.
+
+The app selects `Public Space` by default when opened.
+
 ## Configuration
 
 You can configure the host and port with environment variables:
@@ -69,13 +98,23 @@ $env:PORT = "3107"
 npm start
 ```
 
+## Local Data
+
+Admin credentials, space metadata, and private-space password hashes are stored in:
+
+```text
+cloud-drive-data.json
+```
+
+This file is ignored by git because it contains local credentials.
+
 ## Storage Layout
 
 Uploaded files are stored in the `uploads` directory:
 
 ```text
 uploads/
-  Default Space/
+  Public Space/
     example.mp4
   User A/
     report.pdf
@@ -110,6 +149,25 @@ video-2.mp4
 
 ## API Overview
 
+Admin login:
+
+```http
+POST /api/admin/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "<password>"
+}
+```
+
+Admin logout:
+
+```http
+POST /api/admin/logout
+x-admin-token: <token>
+```
+
 List spaces:
 
 ```http
@@ -120,10 +178,25 @@ Create a space:
 
 ```http
 POST /api/spaces
+x-admin-token: <token>
 Content-Type: application/json
 
 {
-  "name": "User A"
+  "name": "User A",
+  "visibility": "private",
+  "password": "space-password"
+}
+```
+
+Unlock a private space:
+
+```http
+POST /api/spaces/login
+Content-Type: application/json
+
+{
+  "name": "User A",
+  "password": "space-password"
 }
 ```
 
@@ -131,6 +204,7 @@ List files in a space:
 
 ```http
 GET /api/files?space=User%20A
+x-space-token: <space-token>
 ```
 
 Upload a file:
@@ -138,19 +212,28 @@ Upload a file:
 ```http
 POST /api/upload?space=User%20A
 x-file-name: video.mp4
+x-space-token: <space-token>
 Content-Type: video/mp4
 ```
 
 Download a file:
 
 ```http
-GET /files?space=User%20A&name=video.mp4
+GET /files?space=User%20A&name=video.mp4&token=<space-token>
 ```
 
 Delete a file:
 
 ```http
 DELETE /api/files?space=User%20A&name=video.mp4
+x-space-token: <space-token>
+```
+
+Delete a space:
+
+```http
+DELETE /api/spaces?space=User%20A
+x-admin-token: <token>
 ```
 
 ## LAN Access Notes
@@ -170,14 +253,13 @@ This is a local-network file sharing app, not a production cloud storage service
 
 It currently does not include:
 
-- User login
-- Password protection
-- Permission management
 - HTTPS
+- User-level accounts
+- Fine-grained permission management
 - File type restrictions
 - Virus scanning
 
-Only run it on a trusted network. Do not expose it directly to the public internet without adding authentication and transport security.
+Only run it on a trusted network. Do not expose it directly to the public internet without adding stronger authentication and transport security.
 
 ## Development
 

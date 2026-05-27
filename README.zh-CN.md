@@ -2,14 +2,19 @@
 
 [English](./README.md) | 简体中文
 
-一个轻量级本地网盘 Web 应用，使用原生 Node.js、HTML、CSS 和 JavaScript 构建。支持空间隔离、大文件上传、上传进度、文件列表、下载和删除。
+一个轻量级本地网盘 Web 应用，使用原生 Node.js、HTML、CSS 和 JavaScript 构建。支持管理员管理空间、公有空间、私有空间、大文件流式上传、上传进度、文件列表、下载和删除。
 
 本项目运行时不依赖任何 npm 第三方包。
 
 ## 功能特性
 
-- 支持创建多个存储空间，例如 `用户A` 和 `用户B`
-- 文件会上传到当前选中的空间
+- 首次启动自动生成管理员用户名和密码
+- 支持管理员登录和退出登录
+- 只有管理员可以创建空间和删除空间
+- 公有空间不需要密码即可访问
+- 私有空间需要输入空间密码，解锁后才显示文件
+- 管理员登录后可以访问所有空间，不需要输入空间密码
+- 应用打开后默认选择 `公共空间`
 - 不同空间的文件相互隔离，保存在 `uploads/<空间名>` 下
 - 大文件上传采用流式写入，服务端边接收边落盘
 - 浏览器展示上传进度
@@ -35,6 +40,14 @@
 npm start
 ```
 
+首次启动时，服务端会在终端打印管理员账号密码：
+
+```text
+Admin credentials generated:
+  username: admin
+  password: <生成的密码>
+```
+
 打开：
 
 ```text
@@ -53,6 +66,22 @@ http://<你的局域网IP>:3107/
 http://192.168.0.102:3107/
 ```
 
+## 管理员和空间
+
+只有管理员可以创建或删除空间。
+
+空间类型：
+
+- 公有空间：访问不需要密码。
+- 私有空间：需要输入空间密码后，才能查看和上传文件。
+
+管理员权限：
+
+- 管理员登录后，可以直接访问所有空间，不需要输入私有空间密码。
+- 管理员可以在管理面板里退出登录。
+
+应用打开后会默认选择 `公共空间`。
+
 ## 配置
 
 可以通过环境变量配置监听地址和端口：
@@ -69,13 +98,23 @@ $env:PORT = "3107"
 npm start
 ```
 
+## 本地数据
+
+管理员凭据、空间元数据、私有空间密码哈希会保存到：
+
+```text
+cloud-drive-data.json
+```
+
+这个文件已经被 git 忽略，因为它包含本地凭据。
+
 ## 存储结构
 
 上传的文件会保存在 `uploads` 目录：
 
 ```text
 uploads/
-  默认空间/
+  公共空间/
     example.mp4
   用户A/
     report.pdf
@@ -110,6 +149,25 @@ video-2.mp4
 
 ## API 概览
 
+管理员登录：
+
+```http
+POST /api/admin/login
+Content-Type: application/json
+
+{
+  "username": "admin",
+  "password": "<管理员密码>"
+}
+```
+
+管理员退出登录：
+
+```http
+POST /api/admin/logout
+x-admin-token: <token>
+```
+
 获取空间列表：
 
 ```http
@@ -120,10 +178,25 @@ GET /api/spaces
 
 ```http
 POST /api/spaces
+x-admin-token: <token>
 Content-Type: application/json
 
 {
-  "name": "用户A"
+  "name": "用户A",
+  "visibility": "private",
+  "password": "空间密码"
+}
+```
+
+解锁私有空间：
+
+```http
+POST /api/spaces/login
+Content-Type: application/json
+
+{
+  "name": "用户A",
+  "password": "空间密码"
 }
 ```
 
@@ -131,6 +204,7 @@ Content-Type: application/json
 
 ```http
 GET /api/files?space=%E7%94%A8%E6%88%B7A
+x-space-token: <space-token>
 ```
 
 上传文件：
@@ -138,19 +212,28 @@ GET /api/files?space=%E7%94%A8%E6%88%B7A
 ```http
 POST /api/upload?space=%E7%94%A8%E6%88%B7A
 x-file-name: video.mp4
+x-space-token: <space-token>
 Content-Type: video/mp4
 ```
 
 下载文件：
 
 ```http
-GET /files?space=%E7%94%A8%E6%88%B7A&name=video.mp4
+GET /files?space=%E7%94%A8%E6%88%B7A&name=video.mp4&token=<space-token>
 ```
 
 删除文件：
 
 ```http
 DELETE /api/files?space=%E7%94%A8%E6%88%B7A&name=video.mp4
+x-space-token: <space-token>
+```
+
+删除空间：
+
+```http
+DELETE /api/spaces?space=%E7%94%A8%E6%88%B7A
+x-admin-token: <token>
 ```
 
 ## 局域网访问说明
@@ -170,14 +253,13 @@ Windows 下可以通过 `ipconfig` 查看局域网 IP。通常它在以太网或
 
 当前尚未包含：
 
-- 用户登录
-- 密码保护
-- 权限管理
 - HTTPS
+- 多用户账号体系
+- 细粒度权限管理
 - 文件类型限制
 - 病毒扫描
 
-请只在可信网络内运行。不要在没有认证和传输加密的情况下直接暴露到公网。
+请只在可信网络内运行。不要在没有更强认证和传输加密的情况下直接暴露到公网。
 
 ## 开发
 
