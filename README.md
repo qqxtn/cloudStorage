@@ -1,40 +1,38 @@
 # Local Cloud Drive
 
-English | [Chinese](./README.zh-CN.md)
+English | [中文](./README.zh-CN.md)
 
-A lightweight local cloud-drive web app built with plain Node.js and vanilla HTML/CSS/JavaScript. It supports admin-managed storage spaces, public and private spaces, large-file streaming uploads, upload progress, file listing, downloads, and deletion.
+A lightweight local cloud-drive app for personal and LAN file sharing. It supports admin-managed storage spaces, public/private access, large-file streaming uploads, upload progress, file listing, downloads, deletion, and a Windows single-file EXE with a system tray icon.
 
-This project has no runtime npm dependencies.
+The Node.js version has no runtime npm dependencies. The Windows EXE is self-contained and does not require Node.js.
 
 ## Features
 
-- Generate an admin username and password on first run
+- Generate admin credentials on first run
 - Admin login and logout
+- Admin logout returns the app to the public space
 - Admin-only space creation and deletion
 - Public spaces that anyone can access without a password
 - Private spaces that require a space password before files are shown
-- Admin can access all spaces without entering space passwords
-- The app opens on `Public Space` by default
+- Admin can access all spaces without entering private-space passwords
+- The app opens on `Public Space` / `公共空间` by default
 - Keep files isolated by space under `uploads/<space-name>`
-- Stream large files directly to disk on the server
+- Stream large files directly to disk without compression or transcoding
 - Show upload progress in the browser
 - List file name, size, and modified time
 - Download and delete files
 - Access from localhost or another device on the same LAN
+- Windows EXE runs without a console window
+- Windows tray menu for opening the app, copying admin credentials, opening uploads, and exiting
 
-## Tech Stack
+## Run With Node.js
 
-- Node.js HTTP server
-- Vanilla JavaScript frontend
-- HTML and CSS
-- Filesystem-based storage
-
-## Requirements
+Requirements:
 
 - Node.js 18 or newer
 - Windows, macOS, or Linux
 
-## Quick Start
+Start the app:
 
 ```bash
 npm start
@@ -43,7 +41,7 @@ npm start
 On first run, the server prints admin credentials:
 
 ```text
-Admin credentials generated:
+Admin credentials:
   username: admin
   password: <generated-password>
 ```
@@ -60,11 +58,45 @@ The server listens on `0.0.0.0` by default, so other devices on the same LAN can
 http://<your-lan-ip>:3107/
 ```
 
-Example:
+## Run With Windows EXE
+
+Build output:
 
 ```text
-http://192.168.0.102:3107/
+dist/CloudStorage.exe
 ```
+
+Double-click `CloudStorage.exe` to start the app. It runs in the background without opening a CMD window.
+
+On first start, the app shows a copyable admin credential dialog. After startup, a tray icon appears in the Windows notification area.
+
+Tray menu:
+
+- Open cloud drive
+- Copy admin password
+- Open uploads folder
+- Exit
+
+Runtime data is created next to the EXE:
+
+```text
+cloud-drive-data.json
+uploads/
+```
+
+## Build Windows EXE
+
+Requirements:
+
+- .NET SDK 7.0
+
+Publish:
+
+```powershell
+dotnet publish exe-src\CloudStorageExe.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugType=none -p:DebugSymbols=false -o dist
+```
+
+Only `dist/CloudStorage.exe` is needed to run the packaged app.
 
 ## Admin and Spaces
 
@@ -77,25 +109,27 @@ Space types:
 
 Admin access:
 
-- After admin login, all spaces are accessible without entering private space passwords.
+- After admin login, all spaces are accessible without entering private-space passwords.
 - Admin can log out from the admin panel.
+- After admin logout, the app switches back to the public space.
 
-The app selects `Public Space` by default when opened.
+The app selects `公共空间` by default when opened.
 
 ## Configuration
 
-You can configure the host and port with environment variables:
-
-```bash
-HOST=0.0.0.0 PORT=3107 node server.js
-```
-
-On Windows PowerShell:
+Node.js version:
 
 ```powershell
 $env:HOST = "0.0.0.0"
 $env:PORT = "3107"
 npm start
+```
+
+EXE version:
+
+```powershell
+$env:CLOUD_STORAGE_URL = "http://0.0.0.0:3107"
+.\CloudStorage.exe
 ```
 
 ## Local Data
@@ -114,7 +148,7 @@ Uploaded files are stored in the `uploads` directory:
 
 ```text
 uploads/
-  Public Space/
+  公共空间/
     example.mp4
   User A/
     report.pdf
@@ -144,7 +178,20 @@ video-2.mp4
 |   |-- app.js
 |   |-- index.html
 |   `-- styles.css
-`-- uploads/
+`-- exe-src/
+    |-- app.ico
+    |-- CloudStorageExe.csproj
+    `-- Program.cs
+```
+
+Ignored runtime/build output:
+
+```text
+uploads/
+cloud-drive-data.json
+dist/
+exe-src/bin/
+exe-src/obj/
 ```
 
 ## API Overview
@@ -242,7 +289,7 @@ If `http://127.0.0.1:3107/` works but `http://<your-lan-ip>:3107/` does not:
 
 - Make sure the other device is on the same network
 - Use the real LAN IP, not a virtual adapter IP
-- Allow Node.js or TCP port `3107` through the firewall
+- Allow Node.js, `CloudStorage.exe`, or TCP port `3107` through the firewall
 - Avoid guest Wi-Fi networks that block device-to-device access
 
 On Windows, `ipconfig` can show your LAN IP. It is usually under an Ethernet or Wi-Fi adapter and often looks like `192.168.x.x`.
@@ -270,10 +317,10 @@ node --check server.js
 node --check public/app.js
 ```
 
-Start the app:
+Check EXE project:
 
-```bash
-npm start
+```powershell
+dotnet build exe-src\CloudStorageExe.csproj -c Release
 ```
 
 ## License
