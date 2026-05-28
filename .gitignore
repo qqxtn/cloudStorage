@@ -2,6 +2,9 @@ node_modules/
 uploads/
 cloud-drive-data.json
 cloud-drive-data.json.broken-*
+dist/
+exe-src/bin/
+exe-src/obj/
 .idea/
 *.log
 .DS_Store

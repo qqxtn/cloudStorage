@@ -195,6 +195,7 @@ function renderAdmin(loggedIn, username) {
   }
   adminState.textContent = loggedIn ? `已登录：${username}` : "未登录";
   adminLoginForm.classList.toggle("is-hidden", loggedIn);
+  adminLogoutButton.classList.toggle("is-hidden", !loggedIn);
   adminPanel.classList.toggle("is-hidden", !loggedIn);
 }
 
@@ -394,9 +395,11 @@ adminLogoutButton.addEventListener("click", async () => {
 
   adminToken = "";
   localStorage.removeItem("adminToken");
+  activeSpace = DEFAULT_SPACE;
+  localStorage.setItem("activeSpace", activeSpace);
   renderAdmin(false, null);
   setStatus("管理员已退出");
-  await refreshAll();
+  await refreshAll({ keepActiveSpace: DEFAULT_SPACE });
 });
 
 spaceVisibility.addEventListener("change", () => {

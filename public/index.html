@@ -37,8 +37,14 @@
             <input id="adminPasswordInput" type="password" placeholder="管理员密码" autocomplete="current-password" />
             <button type="submit">登录</button>
           </form>
+          <button id="adminLogoutButton" class="secondary-button is-hidden" type="button">退出登录</button>
+        </section>
 
-          <div id="adminPanel" class="admin-panel is-hidden">
+        <section id="adminPanel" class="manage-card is-hidden">
+          <div class="card-head">
+            <span>空间管理</span>
+            <strong>管理员</strong>
+          </div>
             <form id="spaceForm" class="space-form">
               <input id="spaceInput" type="text" placeholder="新建空间名，如 用户A" maxlength="40" />
               <select id="spaceVisibility">
@@ -49,8 +55,6 @@
               <button type="submit">创建空间</button>
             </form>
             <button id="deleteSpaceButton" class="danger-button" type="button">删除当前空间</button>
-            <button id="adminLogoutButton" class="secondary-button" type="button">退出登录</button>
-          </div>
         </section>
 
         <div class="storage-card">
