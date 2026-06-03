@@ -160,7 +160,9 @@ app.MapGet("/files", (HttpRequest request) =>
     var name = SafeFileName(request.Query["name"].FirstOrDefault() ?? "file");
     var file = Path.Combine(SpaceDir(space), name);
     if (!File.Exists(file)) return Results.Json(new { error = "File not found." }, statusCode: 404, options: jsonOptions);
-    return Results.File(file, "application/octet-stream", name);
+    var provider = new FileExtensionContentTypeProvider();
+    if (!provider.TryGetContentType(file, out var contentType)) contentType = "application/octet-stream";
+    return Results.File(file, contentType);
 });
 
 app.MapDelete("/api/files", async (HttpRequest request) =>

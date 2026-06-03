@@ -543,9 +543,8 @@ async function handleRequest(req, res) {
 
       const stats = await fs.promises.stat(filePath);
       res.writeHead(200, {
-        "content-type": "application/octet-stream",
-        "content-length": stats.size,
-        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`
+        "content-type": MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream",
+        "content-length": stats.size
       });
       await pipeline(fs.createReadStream(filePath), res);
       return;

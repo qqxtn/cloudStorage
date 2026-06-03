@@ -41,6 +41,11 @@ const privateSpaceLoginForm = document.querySelector("#privateSpaceLoginForm");
 const modalSpaceName = document.querySelector("#modalSpaceName");
 const modalSpacePasswordInput = document.querySelector("#modalSpacePasswordInput");
 const modalCloseButton = document.querySelector("#modalCloseButton");
+const previewModal = document.querySelector("#previewModal");
+const previewImage = document.querySelector("#previewImage");
+const previewTitle = document.querySelector("#previewTitle");
+const previewDownload = document.querySelector("#previewDownload");
+const previewCloseButton = document.querySelector("#previewCloseButton");
 
 let activeSpace = localStorage.getItem("activeSpace") || DEFAULT_SPACE;
 if (activeSpace === LEGACY_DEFAULT_SPACE) activeSpace = DEFAULT_SPACE;
@@ -79,6 +84,62 @@ function formatDate(value) {
 function fileBadge(name) {
   const extension = name.includes(".") ? name.split(".").pop().slice(0, 4).toUpperCase() : "FILE";
   return extension || "FILE";
+}
+
+function isPreviewableImage(name) {
+  return /\.(apng|avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(name);
+}
+
+function fileUrl(name) {
+  const params = new URLSearchParams({ space: activeSpace, name });
+  const token = spaceToken(activeSpace);
+  if (token) params.set("token", token);
+  if (adminToken) params.set("adminToken", adminToken);
+  return `/files?${params.toString()}`;
+}
+
+function showPreview(name) {
+  const url = fileUrl(name);
+  previewTitle.textContent = name;
+  previewImage.alt = name;
+  previewModal.querySelector(".preview-modal").style.removeProperty("--preview-width");
+  previewModal.querySelector(".preview-modal").style.removeProperty("--preview-height");
+  previewImage.src = url;
+  previewDownload.href = url;
+  previewDownload.download = name;
+  previewModal.classList.remove("is-hidden");
+}
+
+function hidePreview() {
+  previewModal.classList.add("is-hidden");
+  previewImage.removeAttribute("src");
+  previewDownload.removeAttribute("href");
+  previewModal.querySelector(".preview-modal").style.removeProperty("--preview-width");
+  previewModal.querySelector(".preview-modal").style.removeProperty("--preview-height");
+}
+
+function fitPreviewToImage() {
+  if (previewModal.classList.contains("is-hidden")) return;
+  const modal = previewModal.querySelector(".preview-modal");
+  const viewportWidth = window.visualViewport?.width || window.innerWidth;
+  const viewportHeight = window.visualViewport?.height || window.innerHeight;
+
+  if (viewportWidth <= 720) {
+    modal.style.setProperty("--preview-width", `${Math.max(280, viewportWidth - 24)}px`);
+    modal.style.setProperty("--preview-height", `${Math.max(180, viewportHeight - 188)}px`);
+    return;
+  }
+
+  const maxImageWidth = Math.max(320, viewportWidth - 120);
+  const maxImageHeight = Math.max(260, viewportHeight - 230);
+  const naturalWidth = previewImage.naturalWidth || maxImageWidth;
+  const naturalHeight = previewImage.naturalHeight || maxImageHeight;
+  const scale = Math.min(1, maxImageWidth / naturalWidth, maxImageHeight / naturalHeight);
+  const fittedWidth = Math.round(naturalWidth * scale);
+  const fittedHeight = Math.round(naturalHeight * scale);
+
+  modal.style.setProperty("--preview-width", `${Math.max(320, fittedWidth + 48)}px`);
+  modal.style.setProperty("--preview-height", `${Math.max(240, fittedHeight + 2)}px`);
 }
 
 function headers(extra = {}) {
@@ -212,6 +273,9 @@ function renderFiles(files) {
     const item = document.createElement("li");
     const safeName = escapeHtml(file.name);
     const downloadUrl = `/files?space=${encodeURIComponent(activeSpace)}&name=${encodeURIComponent(file.name)}`;
+    const previewButton = isPreviewableImage(file.name)
+      ? `<button class="text-button" data-preview="${safeName}" type="button">预览</button>`
+      : "";
 
     item.className = "file-item";
     item.innerHTML = `
@@ -223,6 +287,7 @@ function renderFiles(files) {
         </div>
       </div>
       <div class="file-actions">
+        ${previewButton}
         <a class="text-button" href="${downloadUrl}" data-download="${safeName}">下载</a>
         <button class="text-button danger" data-delete="${safeName}" type="button">删除</button>
       </div>
@@ -337,9 +402,9 @@ function uploadFileWithProgress(file, fileIndex, fileTotal, completedBytes, tota
 async function uploadFiles(files) {
   if (!files.length || isUploading || !hasSpaceAccess(activeSpace)) return;
 
-  isUploading = true;
-  chooseButton.disabled = true;
-  spaceSelect.disabled = true;
+    isUploading = true;
+    chooseButton.disabled = true;
+    spaceSelect.disabled = true;
   setStatus(`正在上传 ${files.length} 个文件...`);
   setProgress(0, "正在准备上传");
 
@@ -488,6 +553,19 @@ modalCloseButton.addEventListener("click", () => {
   hidePrivateSpaceModal();
 });
 
+previewCloseButton.addEventListener("click", hidePreview);
+
+previewModal.addEventListener("click", (event) => {
+  if (event.target === previewModal) hidePreview();
+});
+
+previewImage.addEventListener("load", () => {
+  fitPreviewToImage();
+});
+
+window.addEventListener("resize", fitPreviewToImage);
+window.visualViewport?.addEventListener("resize", fitPreviewToImage);
+
 spaceSelect.addEventListener("change", async () => {
   activeSpace = spaceSelect.value;
   localStorage.setItem("activeSpace", activeSpace);
@@ -548,6 +626,12 @@ refreshButton.addEventListener("click", () => {
 });
 
 fileList.addEventListener("click", async (event) => {
+  const preview = event.target.closest("[data-preview]");
+  if (preview) {
+    showPreview(preview.dataset.preview);
+    return;
+  }
+
   const download = event.target.closest("[data-download]");
   if (download) {
     const token = spaceToken(activeSpace);

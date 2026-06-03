@@ -2,7 +2,7 @@
 
 English | [中文](./README.zh-CN.md)
 
-A lightweight local cloud-drive app for personal and LAN file sharing. It supports admin-managed storage spaces, public/private access, large-file streaming uploads, upload progress, file listing, downloads, deletion, and a Windows single-file EXE with a system tray icon.
+A lightweight local cloud-drive app for personal and LAN file sharing. It supports admin-managed storage spaces, public/private access, large-file streaming uploads, upload progress, file listing, image preview, downloads, deletion, and a Windows single-file EXE with a system tray icon.
 
 The Node.js version has no runtime npm dependencies. The Windows EXE is self-contained and does not require Node.js.
 
@@ -20,6 +20,8 @@ The Node.js version has no runtime npm dependencies. The Windows EXE is self-con
 - Stream large files directly to disk without compression or transcoding
 - Show upload progress in the browser
 - List file name, size, and modified time
+- Preview uploaded images in the browser
+- Mobile-friendly image preview with scrollable full-image viewing
 - Download and delete files
 - Access from localhost or another device on the same LAN
 - Windows EXE runs without a console window

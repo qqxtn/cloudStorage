@@ -313,6 +313,56 @@ p {
   box-shadow: 0 0 0 3px rgba(8, 127, 140, 0.12);
 }
 
+.preview-modal {
+  width: min(var(--preview-width, 720px), calc(100vw - 24px));
+  max-height: calc(100dvh - 24px);
+  overflow: hidden;
+}
+
+.preview-modal .modal-head {
+  min-width: 0;
+}
+
+.preview-modal .modal-head > div {
+  min-width: 0;
+}
+
+.preview-modal h2 {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-frame {
+  display: grid;
+  place-items: center;
+  height: min(var(--preview-height, 60vh), calc(100dvh - 230px));
+  min-height: 220px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.preview-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.preview-download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  justify-self: end;
+  text-decoration: none;
+}
+
+.preview-modal .icon-button.small {
+  flex: 0 0 36px;
+}
+
 .workspace {
   min-width: 0;
 }
@@ -673,6 +723,58 @@ h1 {
   .upload-copy {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .modal-backdrop {
+    padding: 8px;
+  }
+
+  .preview-modal {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    width: calc(100vw - 24px);
+    max-height: calc(100dvh - 24px);
+    padding: 12px;
+  }
+
+  .preview-modal .modal-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 40px;
+    gap: 10px;
+  }
+
+  .preview-modal .icon-button.small {
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .preview-modal h2 {
+    font-size: 18px;
+    line-height: 1.25;
+  }
+
+  .preview-frame {
+    height: min(var(--preview-height, calc(100dvh - 188px)), calc(100dvh - 188px));
+    min-height: 160px;
+    width: 100%;
+    display: block;
+    overflow: auto;
+    overscroll-behavior: contain;
+  }
+
+  .preview-frame img {
+    width: 100%;
+    height: auto;
+    max-width: none;
+    max-height: none;
+    object-fit: initial;
+  }
+
+  .preview-download {
+    justify-self: stretch;
   }
 
   .file-actions {
