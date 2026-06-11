@@ -90,11 +90,12 @@ function isPreviewableImage(name) {
   return /\.(apng|avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(name);
 }
 
-function fileUrl(name) {
+function fileUrl(name, download = false) {
   const params = new URLSearchParams({ space: activeSpace, name });
   const token = spaceToken(activeSpace);
   if (token) params.set("token", token);
   if (adminToken) params.set("adminToken", adminToken);
+  if (download) params.set("download", "1");
   return `/files?${params.toString()}`;
 }
 
@@ -105,7 +106,7 @@ function showPreview(name) {
   previewModal.querySelector(".preview-modal").style.removeProperty("--preview-width");
   previewModal.querySelector(".preview-modal").style.removeProperty("--preview-height");
   previewImage.src = url;
-  previewDownload.href = url;
+  previewDownload.href = fileUrl(name, true);
   previewDownload.download = name;
   previewModal.classList.remove("is-hidden");
 }
@@ -634,12 +635,7 @@ fileList.addEventListener("click", async (event) => {
 
   const download = event.target.closest("[data-download]");
   if (download) {
-    const token = spaceToken(activeSpace);
-    const baseUrl = `/files?space=${encodeURIComponent(activeSpace)}&name=${encodeURIComponent(download.dataset.download)}`;
-    download.href = baseUrl;
-    if (adminToken || token) {
-      download.href = `${baseUrl}&token=${encodeURIComponent(token)}&adminToken=${encodeURIComponent(adminToken)}`;
-    }
+    download.href = fileUrl(download.dataset.download, true);
     return;
   }
 

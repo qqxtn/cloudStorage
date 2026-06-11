@@ -28,8 +28,22 @@ const MIME_TYPES = {
   ".jpeg": "image/jpeg",
   ".gif": "image/gif",
   ".svg": "image/svg+xml",
-  ".ico": "image/x-icon"
+  ".webp": "image/webp",
+  ".avif": "image/avif",
+  ".ico": "image/x-icon",
+  ".mp4": "video/mp4",
+  ".m4v": "video/x-m4v",
+  ".mov": "video/quicktime",
+  ".webm": "video/webm",
+  ".mp3": "audio/mpeg",
+  ".m4a": "audio/mp4",
+  ".pdf": "application/pdf"
 };
+
+function attachmentHeader(name) {
+  const fallback = name.replace(/[^\x20-\x7e]/g, "_").replace(/["\\\r\n]/g, "_");
+  return `attachment; filename="${fallback}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
 
 function sendJson(res, statusCode, payload) {
   if (res.writableEnded) return;
@@ -357,7 +371,17 @@ async function serveStatic(res, pathname) {
     return;
   }
 
-  const stats = await fs.promises.stat(filePath);
+  let stats;
+  try {
+    stats = await fs.promises.stat(filePath);
+  } catch (error) {
+    if (error?.code === "ENOENT" || error?.code === "ENOTDIR") {
+      sendError(res, 404, "Not found.");
+      return;
+    }
+    throw error;
+  }
+
   if (!stats.isFile()) {
     sendError(res, 404, "Not found.");
     return;
@@ -542,10 +566,41 @@ async function handleRequest(req, res) {
       }
 
       const stats = await fs.promises.stat(filePath);
-      res.writeHead(200, {
-        "content-type": MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream",
-        "content-length": stats.size
-      });
+      const contentType = MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
+      const headers = {
+        "content-type": contentType,
+        "accept-ranges": "bytes"
+      };
+      if (url.searchParams.get("download") === "1") {
+        headers["content-disposition"] = attachmentHeader(name);
+      }
+
+      const range = req.headers.range;
+      if (range) {
+        const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+        if (!match) {
+          res.writeHead(416, { "content-range": `bytes */${stats.size}` });
+          res.end();
+          return;
+        }
+
+        const start = match[1] ? Number(match[1]) : 0;
+        const end = match[2] ? Math.min(Number(match[2]), stats.size - 1) : stats.size - 1;
+        if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || start >= stats.size) {
+          res.writeHead(416, { "content-range": `bytes */${stats.size}` });
+          res.end();
+          return;
+        }
+
+        headers["content-range"] = `bytes ${start}-${end}/${stats.size}`;
+        headers["content-length"] = end - start + 1;
+        res.writeHead(206, headers);
+        await pipeline(fs.createReadStream(filePath, { start, end }), res);
+        return;
+      }
+
+      headers["content-length"] = stats.size;
+      res.writeHead(200, headers);
       await pipeline(fs.createReadStream(filePath), res);
       return;
     }
